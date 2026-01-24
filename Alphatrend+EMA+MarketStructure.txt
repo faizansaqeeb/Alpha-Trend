@@ -1,0 +1,131 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// author © KivancOzbilgic
+// developer © KivancOzbilgic
+//@version=5
+indicator("AlphaTrend + EMA + Market Structure", shorttitle="AT + EMA + MS", overlay=true, max_lines_count=500, max_bars_back=4900, max_boxes_count=500, format=format.price, precision=2)
+
+// ======================================================
+// ===================== ALPHATREND =====================
+// ======================================================
+coeff = input.float(1, "Multiplier", step=0.1)
+AP = input.int(14, "Common Period")
+ATR = ta.sma(ta.tr, AP)
+src = input(close)
+showsignalsk = input.bool(true, "Show Signals?")
+novolumedata = input.bool(false, "Change calculation (no volume data)?")
+
+upT = low - ATR * coeff
+downT = high + ATR * coeff
+
+AlphaTrend = 0.0
+AlphaTrend := (novolumedata ? ta.rsi(src, AP) >= 50 : ta.mfi(hlc3, AP) >= 50) ?
+     (upT < nz(AlphaTrend[1]) ? nz(AlphaTrend[1]) : upT) :
+     (downT > nz(AlphaTrend[1]) ? nz(AlphaTrend[1]) : downT)
+
+color1 = AlphaTrend > AlphaTrend[2] ? #00E60F :
+         AlphaTrend < AlphaTrend[2] ? #80000B :
+         AlphaTrend[1] > AlphaTrend[3] ? #00E60F : #80000B
+
+k1 = plot(AlphaTrend, color=color.new(#0022FC, 0), linewidth=3)
+k2 = plot(AlphaTrend[2], color=color.new(#FC0400, 0), linewidth=3)
+fill(k1, k2, color=color1)
+
+buySignalk = ta.crossover(AlphaTrend, AlphaTrend[2])
+sellSignalk = ta.crossunder(AlphaTrend, AlphaTrend[2])
+
+K1 = ta.barssince(buySignalk)
+K2 = ta.barssince(sellSignalk)
+O1 = ta.barssince(buySignalk[1])
+O2 = ta.barssince(sellSignalk[1])
+
+plotshape(buySignalk and showsignalsk and O1 > K2 ? AlphaTrend[2] * 0.9999 : na,
+     title="BUY", text="BUY", location=location.absolute,
+     style=shape.labelup, size=size.tiny, color=color.new(#0022FC, 0), textcolor=color.white)
+
+plotshape(sellSignalk and showsignalsk and O2 > K1 ? AlphaTrend[2] * 1.0001 : na,
+     title="SELL", text="SELL", location=location.absolute,
+     style=shape.labeldown, size=size.tiny, color=color.new(color.maroon, 0), textcolor=color.white)
+
+// ======================================================
+// ======================== EMA =========================
+// ======================================================
+ema9   = ta.ema(close, 9)
+ema21  = ta.ema(close, 21)
+ema50  = ta.ema(close, 50)
+ema200 = ta.ema(close, 200)
+
+p9   = plot(ema9,   color=color.orange, linewidth=2, title="EMA 9")
+p21  = plot(ema21,  color=color.blue,   linewidth=3, title="EMA 21")
+p50  = plot(ema50,  color=color.red,    linewidth=3, title="EMA 50")
+p200 = plot(ema200, color=color.yellow, linewidth=3, title="EMA 200")
+
+emaFillColor = color.green
+if ema21 < ema50
+    emaFillColor := color.red
+
+fill(p21, p50, color=emaFillColor, transp=85)
+
+// ======================================================
+// ================= MARKET STRUCTURE ===================
+// ======================================================
+settings = "Market Structure"
+zigzag_len = input.int(40, "ZigZag Length", group=settings)
+show_zigzag = input.bool(true, "Show Zigzag", group=settings)
+zigzag_width = input.int(2, "ZigZag Line Width", group=settings, minval=1, maxval=5)
+show_labels = input.bool(true, "Show HH, HL, LL, LH Labels", group=settings)
+
+text_size = input.string(size.tiny, "Text Size", [size.tiny, size.small, size.normal, size.large, size.huge], group=settings)
+
+var float[] high_points_arr = array.new_float(5)
+var int[] high_index_arr = array.new_int(5)
+var float[] low_points_arr = array.new_float(5)
+var int[] low_index_arr = array.new_int(5)
+
+to_up = high >= ta.highest(zigzag_len)
+to_down = low <= ta.lowest(zigzag_len)
+
+trend = 1
+trend := nz(trend[1], 1)
+trend := trend == 1 and to_down ? -1 : trend == -1 and to_up ? 1 : trend
+
+last_trend_up_since = ta.barssince(to_up[1])
+low_val = ta.lowest(nz(last_trend_up_since > 0 ? last_trend_up_since : 1))
+low_index = bar_index - ta.barssince(low_val == low)
+
+last_trend_down_since = ta.barssince(to_down[1])
+high_val = ta.highest(nz(last_trend_down_since > 0 ? last_trend_down_since : 1))
+high_index = bar_index - ta.barssince(high_val == high)
+
+if ta.change(trend) != 0
+    if trend == 1
+        array.push(low_points_arr, low_val)
+        array.push(low_index_arr, low_index)
+    if trend == -1
+        array.push(high_points_arr, high_val)
+        array.push(high_index_arr, high_index)
+
+h0 = array.size(high_points_arr) > 1 ? array.get(high_points_arr, array.size(high_points_arr) - 1) : na
+h0i = array.size(high_index_arr) > 1 ? array.get(high_index_arr, array.size(high_index_arr) - 1) : na
+h1 = array.size(high_points_arr) > 2 ? array.get(high_points_arr, array.size(high_points_arr) - 2) : na
+
+l0 = array.size(low_points_arr) > 1 ? array.get(low_points_arr, array.size(low_points_arr) - 1) : na
+l0i = array.size(low_index_arr) > 1 ? array.get(low_index_arr, array.size(low_index_arr) - 1) : na
+l1 = array.size(low_points_arr) > 2 ? array.get(low_points_arr, array.size(low_points_arr) - 2) : na
+
+if ta.change(trend) != 0
+    if show_zigzag
+        if trend == 1
+            line.new(h0i, h0, l0i, l0, color=color.white, width=zigzag_width)
+        if trend == -1
+            line.new(l0i, l0, h0i, h0, color=color.white, width=zigzag_width)
+
+    if show_labels
+        if h0 > h1
+            label.new(h0i, h0, "HH", color=color.green, textcolor=color.white, size=text_size, style=label.style_label_down)
+        else
+            label.new(h0i, h0, "LH", color=color.red, textcolor=color.white, size=text_size, style=label.style_label_down)
+
+        if l0 < l1
+            label.new(l0i, l0, "LL", color=color.red, textcolor=color.white, size=text_size, style=label.style_label_up)
+        else
+            label.new(l0i, l0, "HL", color=color.green, textcolor=color.white, size=text_size, style=label.style_label_up)

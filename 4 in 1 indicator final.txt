@@ -1,0 +1,246 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0
+// © ChartPrime + KivancOzbilgic | Exact Logic Merge
+
+//@version=5
+indicator("Support & Resistance + EMA + AlphaTrend + Market Structure (Exact)", shorttitle="SR + EMA + AT + MS", overlay=true, max_boxes_count=500, max_lines_count=500, max_bars_back=4900, format=format.price, precision=2)
+
+//====================================================================
+// INPUTS — SUPPORT & RESISTANCE
+//====================================================================
+
+lookbackPeriod = input.int(20, "Lookback Period", minval=1, group="Support & Resistance")
+vol_len        = input.int(2, "Delta Volume Filter Length", group="Support & Resistance")
+box_withd      = input.float(1.0, "Adjust Box Width", minval=0.0, step=0.1, group="Support & Resistance")
+
+//====================================================================
+// INPUTS — ALPHATREND
+//====================================================================
+
+coeff        = input.float(1.0, "Multiplier", step=0.1, group="AlphaTrend")
+AP           = input.int(14, "Common Period", group="AlphaTrend")
+src          = input.source(close, "Source", group="AlphaTrend")
+showsignalsk = input.bool(true, "Show Signals?", group="AlphaTrend")
+novolumedata = input.bool(false, "Change calculation (no volume data)?", group="AlphaTrend")
+
+//====================================================================
+// INPUTS — MARKET STRUCTURE
+//====================================================================
+
+settings     = "Market Structure"
+zigzag_len   = input.int(40, "ZigZag Length", group=settings)
+show_zigzag  = input.bool(true, "Show Zigzag", group=settings)
+zigzag_color = input.color(color.blue, "ZigZag Line Color", group=settings)
+zigzag_width = input.int(2, "ZigZag Line Width", minval=1, maxval=5, group=settings)
+show_labels  = input.bool(true, "Show HH, HL, LL, LH Labels", group=settings)
+fib_factor   = input.float(0.33, "Fib Factor for breakout confirmation", 0, 1, 0.01, group=settings)
+text_size    = input.string(size.tiny, "Text Size", [size.tiny, size.small, size.normal, size.large, size.huge], group=settings)
+
+//====================================================================
+// SUPPORT & RESISTANCE FUNCTIONS
+//====================================================================
+
+upAndDownVolume() =>
+    posVol = 0.0
+    negVol = 0.0
+    var bool isBuyVolume = true
+    switch
+        close > open => isBuyVolume := true
+        close < open => isBuyVolume := false
+    if isBuyVolume
+        posVol += volume
+    else
+        negVol -= volume
+    posVol + negVol
+
+calcSupportResistance(src, lookbackPeriod) =>
+    Vol    = upAndDownVolume()
+    vol_hi = ta.highest(Vol / 2.5, vol_len)
+    vol_lo = ta.lowest(Vol / 2.5, vol_len)
+
+    var float supportLevel      = na
+    var float supportLevel_1    = na
+    var float resistanceLevel   = na
+    var float resistanceLevel_1 = na
+    var box   sup               = na
+    var box   res               = na
+    var color sup_color         = na
+    var color res_color         = na
+
+    var bool brekout_res = false
+    var bool brekout_sup = false
+    var bool res_holds   = false
+    var bool sup_holds   = false
+
+    pivotHigh = ta.pivothigh(src, lookbackPeriod, lookbackPeriod)
+    pivotLow  = ta.pivotlow(src, lookbackPeriod, lookbackPeriod)
+    atrVal    = ta.atr(200)
+    withd     = atrVal * box_withd
+
+    if not na(pivotLow) and Vol > vol_hi
+        supportLevel   := pivotLow
+        supportLevel_1 := supportLevel - withd
+        sup_color := color.from_gradient(Vol, 0, ta.highest(Vol, 25), color(na), color.new(color.green, 30))
+        sup := box.new(chart.point.from_index(bar_index - lookbackPeriod, supportLevel), chart.point.from_index(bar_index, supportLevel_1), border_color=color.green, border_width=1, bgcolor=sup_color)
+
+    if not na(pivotHigh) and Vol < vol_lo
+        resistanceLevel   := pivotHigh
+        resistanceLevel_1 := resistanceLevel + withd
+        res_color := color.from_gradient(Vol, ta.lowest(Vol, 25), 0, color.new(color.red, 30), color(na))
+        res := box.new(chart.point.from_index(bar_index - lookbackPeriod, resistanceLevel), chart.point.from_index(bar_index, resistanceLevel_1), border_color=color.red, border_width=1, bgcolor=res_color)
+
+    sup.set_right(bar_index + 1)
+    res.set_right(bar_index + 1)
+
+    brekout_res := ta.crossover(low, resistanceLevel_1)
+    res_holds   := ta.crossunder(high, resistanceLevel)
+    sup_holds   := ta.crossover(low, supportLevel)
+    brekout_sup := ta.crossunder(high, supportLevel_1)
+
+    if brekout_sup
+        sup.set_bgcolor(color.new(color.red, 80))
+    if sup_holds
+        sup.set_bgcolor(sup_color)
+    if brekout_res
+        res.set_bgcolor(color.new(color.green, 80))
+    if res_holds
+        res.set_bgcolor(res_color)
+
+    [supportLevel, resistanceLevel, brekout_res, res_holds, sup_holds, brekout_sup]
+
+//====================================================================
+// APPLY SUPPORT & RESISTANCE
+//====================================================================
+
+[supportLevel, resistanceLevel, brekout_res, res_holds, sup_holds, brekout_sup] = calcSupportResistance(close, lookbackPeriod)
+
+//====================================================================
+// BREAK + DIAMOND LOGIC (RESTORED)
+//====================================================================
+
+var bool res_is_sup = na
+var bool sup_is_res = na
+
+switch
+    brekout_res => res_is_sup := true
+    res_holds   => res_is_sup := false
+
+switch
+    brekout_sup => sup_is_res := true
+    sup_holds   => sup_is_res := false
+
+plotchar(res_holds, "Resistance Holds", "◆", color=#e92929, size=size.tiny, location=location.abovebar, offset=-1)
+plotchar(sup_holds, "Support Holds", "◆", color=#20ca26, size=size.tiny, location=location.belowbar, offset=-1)
+plotchar(brekout_res and res_is_sup[1], "Resistance as Support Holds", "◆", color=#20ca26, size=size.tiny, location=location.belowbar, offset=-1)
+plotchar(brekout_sup and sup_is_res[1], "Support as Resistance Holds", "◆", color=#e92929, size=size.tiny, location=location.abovebar, offset=-1)
+
+if brekout_sup and not sup_is_res[1]
+    label.new(bar_index[1], supportLevel[1], "Break Sup", style=label.style_label_down, color=#7e1e1e, textcolor=color.white, size=size.small)
+
+if brekout_res and not res_is_sup[1]
+    label.new(bar_index[1], resistanceLevel[1], "Break Res", style=label.style_label_up, color=#2b6d2d, textcolor=color.white, size=size.small)
+
+//====================================================================
+// EMA OVERLAY
+//====================================================================
+
+plot(ta.ema(close, 9), color=#0088FA, linewidth=2)
+plot(ta.ema(close, 50), color=color.white, linewidth=2)
+plot(ta.ema(close, 200), color=color.yellow, linewidth=1)
+
+//====================================================================
+// ALPHATREND (FULLY RESTORED)
+//====================================================================
+
+ATR = ta.sma(ta.tr, AP)
+upT = low - ATR * coeff
+downT = high + ATR * coeff
+
+AlphaTrend = 0.0
+
+if novolumedata
+    if ta.rsi(src, AP) >= 50
+        AlphaTrend := upT < nz(AlphaTrend[1]) ? nz(AlphaTrend[1]) : upT
+    else
+        AlphaTrend := downT > nz(AlphaTrend[1]) ? nz(AlphaTrend[1]) : downT
+else
+    if ta.mfi(hlc3, AP) >= 50
+        AlphaTrend := upT < nz(AlphaTrend[1]) ? nz(AlphaTrend[1]) : upT
+    else
+        AlphaTrend := downT > nz(AlphaTrend[1]) ? nz(AlphaTrend[1]) : downT
+
+color1 = AlphaTrend > AlphaTrend[2] ? #00E60F : AlphaTrend < AlphaTrend[2] ? #80000B : AlphaTrend[1] > AlphaTrend[3] ? #00E60F : #80000B
+
+k1 = plot(AlphaTrend, color=color.new(#0022FC, 0), linewidth=3)
+k2 = plot(AlphaTrend[2], color=color.new(#FC0400, 0), linewidth=3)
+fill(k1, k2, color=color1)
+
+buySignalk  = ta.crossover(AlphaTrend, AlphaTrend[2])
+sellSignalk = ta.crossunder(AlphaTrend, AlphaTrend[2])
+
+K1 = ta.barssince(buySignalk)
+K2 = ta.barssince(sellSignalk)
+O1 = ta.barssince(buySignalk[1])
+O2 = ta.barssince(sellSignalk[1])
+
+plotshape(buySignalk and showsignalsk and O1 > K2 ? AlphaTrend[2] * 0.9999 : na, title="BUY", text="BUY", location=location.absolute, style=shape.labelup, size=size.tiny, color=color.new(#0022FC, 0), textcolor=color.white)
+plotshape(sellSignalk and showsignalsk and O2 > K1 ? AlphaTrend[2] * 1.0001 : na, title="SELL", text="SELL", location=location.absolute, style=shape.labeldown, size=size.tiny, color=color.new(color.maroon, 0), textcolor=color.white)
+
+//====================================================================
+// MARKET STRUCTURE (UNCHANGED)
+//====================================================================
+
+var float[] high_points_arr = array.new_float(5)
+var int[]   high_index_arr  = array.new_int(5)
+var float[] low_points_arr  = array.new_float(5)
+var int[]   low_index_arr   = array.new_int(5)
+
+to_up   = high >= ta.highest(zigzag_len)
+to_down = low <= ta.lowest(zigzag_len)
+
+trend = 1
+trend := nz(trend[1], 1)
+trend := trend == 1 and to_down ? -1 : trend == -1 and to_up ? 1 : trend
+
+last_trend_up_since = ta.barssince(to_up[1])
+low_val = ta.lowest(nz(last_trend_up_since > 0 ? last_trend_up_since : 1))
+low_index = bar_index - ta.barssince(low_val == low)
+
+last_trend_down_since = ta.barssince(to_down[1])
+high_val = ta.highest(nz(last_trend_down_since > 0 ? last_trend_down_since : 1))
+high_index = bar_index - ta.barssince(high_val == high)
+
+if ta.change(trend) != 0
+    if trend == 1
+        array.push(low_points_arr, low_val)
+        array.push(low_index_arr, low_index)
+    if trend == -1
+        array.push(high_points_arr, high_val)
+        array.push(high_index_arr, high_index)
+
+h0 = array.size(high_points_arr) > 1 ? array.get(high_points_arr, array.size(high_points_arr) - 1) : na
+h0i = array.size(high_index_arr) > 1 ? array.get(high_index_arr, array.size(high_index_arr) - 1) : na
+h1 = array.size(high_points_arr) > 2 ? array.get(high_points_arr, array.size(high_points_arr) - 2) : na
+h1i = array.size(high_index_arr) > 2 ? array.get(high_index_arr, array.size(high_index_arr) - 2) : na
+
+l0 = array.size(low_points_arr) > 1 ? array.get(low_points_arr, array.size(low_points_arr) - 1) : na
+l0i = array.size(low_index_arr) > 1 ? array.get(low_index_arr, array.size(low_index_arr) - 1) : na
+l1 = array.size(low_points_arr) > 2 ? array.get(low_points_arr, array.size(low_points_arr) - 2) : na
+l1i = array.size(low_index_arr) > 2 ? array.get(low_index_arr, array.size(low_index_arr) - 2) : na
+
+if ta.change(trend) != 0
+    if show_zigzag
+        if trend == 1
+            line.new(h0i, h0, l0i, l0, color=zigzag_color, width=zigzag_width)
+        if trend == -1
+            line.new(l0i, l0, h0i, h0, color=zigzag_color, width=zigzag_width)
+
+    if show_labels
+        if h0 > h1
+            label.new(h0i, h0, "HH", color=color.green, textcolor=color.white, size=text_size, style=label.style_label_down)
+        else
+            label.new(h0i, h0, "LH", color=color.red, textcolor=color.white, size=text_size, style=label.style_label_down)
+
+        if l0 < l1
+            label.new(l0i, l0, "LL", color=color.red, textcolor=color.white, size=text_size, style=label.style_label_up)
+        else
+            label.new(l0i, l0, "HL", color=color.green, textcolor=color.white, size=text_size, style=label.style_label_up)
